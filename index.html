@@ -779,7 +779,7 @@
           <button id="tuneRandom" title="HARD only: reroll the chord fantasy, a fresh in-key progression that fits the singing">&#9860; RANDOMIZE</button>
           <button id="tuneApply" class="primary" title="Render the snap into the material (Ctrl+Z undoes)">APPLY</button>
         </div>
-        <p class="edit-panel-hint">TAP A TILE = RENDER + HEAR &middot; ROBOT: GRID LOCKS STEPS TO THE BEAT &middot; DRAG A BAR = SET A NOTE IN KEY &middot; APPLY IS DESTRUCTIVE &middot; CTRL+Z UNDOES</p>
+        <p class="edit-panel-hint">TAP A TILE = RENDER + HEAR &middot; WHEEL = ZOOM, SHIFT-DRAG = PAN &middot; ROBOT: GRID LOCKS STEPS, DRAG A BAR = SET A NOTE IN KEY &middot; APPLY IS DESTRUCTIVE &middot; CTRL+Z UNDOES</p>
       </div>
     </section>
 
@@ -852,7 +852,7 @@
       <div class="meter foot-meter"><i id="outMeterFill"></i></div>
     </footer>
   </div>
-  <div class="chassis-foot"><span class="chassis-rev">REV 5.02</span><span class="chassis-slogan">THE SIGNAL CONTINUES</span></div>
+  <div class="chassis-foot"><span class="chassis-rev">REV 5.03</span><span class="chassis-slogan">THE SIGNAL CONTINUES</span></div>
   <div id="waveOverlay">
     <div class="ov-head">
       <span class="ov-title" id="ovTitle">DETAIL</span>
@@ -1441,7 +1441,7 @@ var THE_SIGNAL_MP3="data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwL
 (() => {
   "use strict";
 
-  const REV="5.02";                          // Bei jeder Uebergabe hochzaehlen: sichtbar unten links + Konsole
+  const REV="5.03";                          // Bei jeder Uebergabe hochzaehlen: sichtbar unten links + Konsole
   try { console.log("%cTHE DRECKSLER // REV "+REV, "color:#ff6a00;background:#1a0709;padding:2px 8px;"); } catch{}
 
   function fitBrandTag(){
@@ -4635,6 +4635,11 @@ var THE_SIGNAL_MP3="data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwL
   const tuneRootSel=$("#tuneRoot"), tuneInfo=$("#tuneInfo"), tuneKeySrc=$("#tuneKeySrc");
   let tuneScaleVal="maj", tuneMode="raw", tuneRootTouched=false;   // raw | hard | soft | robot | vocoder: Grundzustand raw: kein Effekt
   let tuneGrid=0;                            // ROBOT-Gitter: 0=aus (frei gesungen) | 8=1/8 | 16=1/16, rastert auf Material-BPM
+  let tuneView=null, tunePan=null;           // tuneView {t0,t1} = Zoom-Fenster der Tune-Ansicht (null = ganzes Material); tunePan = laufendes Shift-Schieben
+  const tvT0=()=>tuneView?tuneView.t0:0;
+  const tvT1=()=>tuneView?tuneView.t1:(buffer?buffer.duration:(tuneF0?tuneF0.length*TUNE_HOP/tuneSr:0));
+  const tvDur=()=>Math.max(1e-6, tvT1()-tvT0());
+  const tuneXSamp=(xc,cw)=>(tvT0()+Math.max(0,Math.min(1,(xc-48)/(cw-48)))*tvDur())*tuneSr;   // Cursor-X -> Sample, fensterbewusst
   const TUNE_NOTES=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
   TUNE_NOTES.forEach((nm,i)=>{ const o=document.createElement("option"); o.value=i; o.textContent=nm; tuneRootSel.appendChild(o); });
   const TUNE_HOP=1024, TUNE_FRAME=2048;
@@ -4663,7 +4668,7 @@ var THE_SIGNAL_MP3="data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwL
     return mono;
   }
   function tuneAnalyze(){
-    tuneOverrides={}; tuneDragSeg=-1; tuneDragBaseNote=0; tuneGrid=0;
+    tuneOverrides={}; tuneDragSeg=-1; tuneDragBaseNote=0; tuneGrid=0; tuneView=null; tunePan=null;
     if (tuneBusy) return;
     tuneBusy=true; tuneSr=buffer.sampleRate; if (tuneBufRef!==buffer) tuneRootTouched=false; tuneBufRef=buffer;
     const mono=tuneMono(), nF=Math.max(0, Math.floor((mono.length-TUNE_FRAME)/TUNE_HOP)+1);
@@ -4797,14 +4802,16 @@ var THE_SIGNAL_MP3="data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwL
     const PW=48;
     g.fillStyle="#0a0805"; g.fillRect(0,0,w,hh);
     if (buffer){                                                // Material-Silhouette: Magenta-Glut der Station
-      const ch=buffer.getChannelData(0), n=ch.length, mid=hh/2, stepN=Math.max(1, Math.floor(n/(w-PW)));
+      const ch=buffer.getChannelData(0), n=ch.length, mid=hh/2, rate=buffer.sampleRate;
+      const s0=Math.max(0,Math.floor(tvT0()*rate)), s1=Math.min(n,Math.ceil(tvT1()*rate));
+      const span=Math.max(1,s1-s0), stepN=Math.max(1, Math.floor(span/(w-PW)));
       const sil=g.createLinearGradient(PW,0,PW,hh);
       sil.addColorStop(0,"rgba(255,150,228,.85)"); sil.addColorStop(0.5,"rgba(255,91,208,.55)"); sil.addColorStop(1,"rgba(168,45,128,.7)");
       g.fillStyle=sil;
       g.shadowColor="rgba(255,91,208,.5)"; g.shadowBlur=6;
       for (let x=PW;x<w;x++){
         let mn=1, mx=-1;
-        for (let k2=0;k2<stepN;k2++){ const v=ch[(x-PW)*stepN+k2]||0; if (v<mn) mn=v; if (v>mx) mx=v; }
+        for (let k2=0;k2<stepN;k2++){ const v=ch[s0+(x-PW)*stepN+k2]||0; if (v<mn) mn=v; if (v>mx) mx=v; }
         if (mx>=mn) g.fillRect(x, mid+mn*mid*0.92, 1, Math.max(1,(mx-mn)*mid*0.92));
       }
       g.shadowBlur=0;
@@ -4822,8 +4829,8 @@ var THE_SIGNAL_MP3="data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwL
     tuneMidiLo=mLo; tuneMidiHi=mHi;
     const yOf=(m)=>hh-((m-mLo)/(mHi-mLo))*hh;
     const segs=segsWithOverrides();
-    const totalT=buffer ? buffer.duration : (tuneF0.length*TUNE_HOP/tuneSr);
-    const xOfT=(t)=>PW+t/totalT*(w-PW);
+    const tv0_=tvT0(), tvD_=tvDur();
+    const xOfT=(t)=>PW+((t-tv0_)/tvD_)*(w-PW);
     const playP=(playT!=null)?playT*tuneSr:null;
     // Neon-Schlauch: Pitch-Track mit Glow + leuchtende Kugel am Playhead
     const nPF_=tuneF0.length;
@@ -4986,12 +4993,16 @@ var THE_SIGNAL_MP3="data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwL
   $("#tuneStop").addEventListener("click", ()=>{ if(tunePrevSrc){ tuneLeave(); drawTune(); tuneInfo.textContent="-"; } });
   tuneCv.addEventListener("pointerdown",(e)=>{
     if (!tuneF0||!buffer) return;
+    if (e.shiftKey && tuneView){                               // Shift+Drag = Ausschnitt schieben (alle Modi)
+      tunePan={ x:e.clientX, t0:tuneView.t0, t1:tuneView.t1 };
+      tuneCv.style.cursor="grabbing"; tuneCv.setPointerCapture(e.pointerId); e.preventDefault(); return;
+    }
     if (tuneMode!=="robot") return;                            // Ziehen nur bei ROBOT (REV 5.01)
     const r=tuneCv.getBoundingClientRect();
     const xc=e.clientX-r.left, yc=e.clientY-r.top;
     if (xc<48) return;
     const cw=tuneCv.clientWidth, ch=tuneCv.clientHeight;
-    const tSamp=Math.max(0,(xc-48)/(cw-48))*buffer.duration*tuneSr;
+    const tSamp=tuneXSamp(xc, cw);
     const segs_=segsWithOverrides();
     for (let i=0;i<segs_.length;i++){
       const sg=segs_[i];
@@ -5002,13 +5013,19 @@ var THE_SIGNAL_MP3="data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwL
     }
   });
   tuneCv.addEventListener("pointermove",(e)=>{
+    if (tunePan){                                              // Ausschnitt schieben
+      const cw=tuneCv.clientWidth, full=buffer?buffer.duration:0, len=tunePan.t1-tunePan.t0;
+      const dt=((e.clientX-tunePan.x)/(cw-48))*len;
+      let t0=Math.max(0, Math.min(full-len, tunePan.t0-dt));
+      tuneView={ t0, t1:t0+len }; drawTune(); return;
+    }
     if (tuneMode!=="robot"){ if(tuneHoverSeg>=0){ tuneHoverSeg=-1; tuneCv.style.cursor="default"; } return; }
     if (tuneDragSeg<0){
       if (!tuneF0||!buffer){ return; }
       const r_=tuneCv.getBoundingClientRect();
       const xc_=e.clientX-r_.left, yc_=e.clientY-r_.top;
       const cw_=tuneCv.clientWidth, ch_=tuneCv.clientHeight;
-      const tS_=Math.max(0,(xc_-48)/(cw_-48))*buffer.duration*tuneSr;
+      const tS_=tuneXSamp(xc_, cw_);
       const segsH_=(tuneMode!=="vocoder" && tuneMode!=="raw")?segsWithOverrides():[];
       let found_=-1;
       for(let i=0;i<segsH_.length;i++){
@@ -5025,9 +5042,21 @@ var THE_SIGNAL_MP3="data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwL
     tuneOverrides[tuneDragSeg]=snapMidi(m, +tuneRootSel.value, TUNE_SCALES[tuneScaleVal]||TUNE_SCALES.chrom);  // auf Note der Tonart rasten
     drawTune(null);
   });
-  tuneCv.addEventListener("pointerup",()=>{ tuneDragSeg=-1; tuneCv.style.cursor="default"; });
-  tuneCv.addEventListener("pointercancel",()=>{ tuneDragSeg=-1; tuneCv.style.cursor="default"; });
+  tuneCv.addEventListener("pointerup",()=>{ tuneDragSeg=-1; tunePan=null; tuneCv.style.cursor="default"; });
+  tuneCv.addEventListener("pointercancel",()=>{ tuneDragSeg=-1; tunePan=null; tuneCv.style.cursor="default"; });
   tuneCv.addEventListener("pointerleave",()=>{ if(tuneDragSeg<0&&tuneHoverSeg>=0){ tuneHoverSeg=-1; tuneCv.style.cursor="default"; drawTune(null); } });
+  tuneCv.addEventListener("wheel",(e)=>{                       // Zoom am Cursor (wie der Editor); Shift+Drag schiebt
+    if (!buffer) return;
+    e.preventDefault();
+    const r=tuneCv.getBoundingClientRect(), cw=tuneCv.clientWidth, full=buffer.duration;
+    const cursorT=tvT0()+Math.max(0,Math.min(1,(e.clientX-r.left-48)/(cw-48)))*tvDur();
+    const f=e.deltaY<0 ? 1/1.25 : 1.25;                        // rein/raus
+    let len=tvDur()*f; len=Math.max(0.03, Math.min(full, len));
+    if (len>=full-0.001){ tuneView=null; drawTune(); return; }
+    const rel=(cursorT-tvT0())/tvDur();                        // Punkt unterm Cursor bleibt stehen
+    let t0=Math.max(0, Math.min(full-len, cursorT-rel*len));
+    tuneView={ t0, t1:t0+len }; drawTune();
+  }, { passive:false });
   $("#tileSoft").addEventListener("click", ()=>tuneTapTile("soft"));
   $("#tileRobot").addEventListener("click", ()=>tuneTapTile("robot"));
   $("#tileVoc").addEventListener("click", ()=>tuneTapTile("vocoder"));
